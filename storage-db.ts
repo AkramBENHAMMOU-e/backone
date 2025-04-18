@@ -218,7 +218,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Order operations
-  async createOrder(insertOrder: InsertOrder, items: InsertOrderItem[]): Promise<Order> {
+  async createOrder(insertOrder: InsertOrder, items: Omit<InsertOrderItem, "orderId">[]): Promise<Order> {
     // Start a transaction
     return await db.transaction(async (tx: any) => {
       // Create the order
