@@ -37,18 +37,18 @@ app.use(cors({
 // Ajouter un middleware pour gérer les requêtes OPTIONS (preflight)
 app.options('*', cors());
 
-// Configuration de session compatible avec Vercel Serverless
+// --- Session Configuration ---
 app.use(session({
   secret: process.env.SESSION_SECRET || 'sportmarocshop-secret',
   resave: false,
   saveUninitialized: false,
+  store: new MemoryStoreSession({ checkPeriod: 86400000 }),
   cookie: {
+    httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    maxAge: 24 * 60 * 60 * 1000 // 24 heures
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    maxAge: 1000 * 60 * 60 * 24, // 1 day
   },
-  store: new MemoryStoreSession({
-    checkPeriod: 86400000 // 24 heures en millisecondes
-  })
 }));
 
 app.use(express.json({ limit: '5mb' }));
