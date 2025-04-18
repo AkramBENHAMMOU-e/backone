@@ -107,10 +107,7 @@ var statsSchema = z.object({
 // db.ts
 import { neon, neonConfig } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
-import ws from "ws";
-neonConfig.webSocketConstructor = ws;
 neonConfig.fetchConnectionCache = true;
-neonConfig.useSecureWebSocket = true;
 var DATABASE_URL = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_GkyWtclF76xe@ep-muddy-scene-a2dyqp50-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require";
 console.log("Connexion \xE0 la base de donn\xE9es avec URL:", DATABASE_URL);
 var sql;
@@ -118,19 +115,27 @@ var db;
 try {
   sql = neon(DATABASE_URL);
   db = drizzle(sql, { schema: schema_exports });
+  console.log("Initialisation de Drizzle r\xE9ussie.");
 } catch (error) {
   console.error("Failed to initialize database connection:", error);
-  const mockSql = async () => [];
+  const mockSql = async () => {
+    console.error("Using fallback mock database connection due to initialization error.");
+    throw new Error("Database connection failed during initialization");
+  };
   sql = mockSql;
   db = drizzle(mockSql, { schema: schema_exports });
 }
 async function testConnection() {
+  if (typeof sql === "function" && sql.toString().includes("mockSql")) {
+    console.error("testConnection: Database initialization previously failed.");
+    return false;
+  }
   try {
     const result = await sql`SELECT 1 as connection_test`;
-    console.log("Database connection successful", result);
+    console.log("Database connection test successful", result);
     return true;
   } catch (error) {
-    console.error("Database connection error:", error);
+    console.error("Database connection test error:", error);
     return false;
   }
 }
