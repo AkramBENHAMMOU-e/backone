@@ -1044,29 +1044,17 @@ app.use(session3({
     // 24 heures en millisecondes
   })
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ extended: false, limit: "5mb" }));
 app.use((req, res, next) => {
   try {
     const start = Date.now();
     const path = req.path;
-    let capturedJsonResponse = void 0;
-    const originalResJson = res.json;
-    res.json = function(bodyJson, ...args) {
-      capturedJsonResponse = bodyJson;
-      return originalResJson.apply(res, [bodyJson, ...args]);
-    };
     res.on("finish", () => {
       const duration = Date.now() - start;
       if (path.startsWith("/api")) {
-        let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-        if (capturedJsonResponse) {
-          logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-        }
-        if (logLine.length > 80) {
-          logLine = logLine.slice(0, 79) + "\u2026";
-        }
-        log(logLine);
+        const logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+        console.log(logLine);
       }
     });
     next();
@@ -1085,8 +1073,7 @@ app.get("/api/health", async (req, res) => {
   } catch (error) {
     res.status(500).json({
       status: "ERROR",
-      message: "Health check failed",
-      error: process.env.NODE_ENV === "development" ? error : void 0
+      message: "Health check failed"
     });
   }
 });
@@ -1095,25 +1082,19 @@ app.use((err, _req, res, _next) => {
   console.error("Error caught by global error handler:", err);
   const status = err.status || err.statusCode || 500;
   const message = err.message || "Internal Server Error";
-  res.status(status).json({
-    message,
-    error: process.env.NODE_ENV === "development" ? err.stack : void 0
-  });
+  res.status(status).json({ message });
 });
 app.use((_req, res) => {
   res.status(404).json({ message: "Route not found" });
 });
-(async () => {
-  try {
-    await testConnection();
-    console.log("Database connection verified at startup");
-  } catch (error) {
-    console.error("Failed to connect to database at startup:", error);
-  }
-})();
 if (process.env.NODE_ENV === "development") {
   const server = app.listen(5e3, () => {
     console.log(`Server started on port 5000`);
+    testConnection().then((connected) => {
+      console.log(`Database connection test: ${connected ? "successful" : "failed"}`);
+    }).catch((err) => {
+      console.error("Database connection test error:", err);
+    });
   });
   setupVite(app, server);
 } else {

@@ -3,7 +3,7 @@
   "builds": [
     {
       "src": "index.ts",
-      "use": "@vercel/node"
+      "use": "@vercel/node@2.15.10"
     }
   ],
   "routes": [
@@ -18,11 +18,5 @@
   ],
   "env": {
     "NODE_ENV": "production"
-  },
-  "functions": {
-    "index.ts": {
-      "memory": 1024,
-      "maxDuration": 10
-    }
   }
 } 

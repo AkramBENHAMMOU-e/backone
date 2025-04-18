@@ -37,35 +37,20 @@ app.use(session({
   })
 }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: false, limit: '5mb' }));
 
-// Middleware de logging
+// Middleware de logging simplifié pour Vercel
 app.use((req, res, next) => {
   try {
     const start = Date.now();
     const path = req.path;
-    let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-    const originalResJson = res.json;
-    res.json = function (bodyJson, ...args) {
-      capturedJsonResponse = bodyJson;
-      return originalResJson.apply(res, [bodyJson, ...args]);
-    };
-
+    
     res.on("finish", () => {
       const duration = Date.now() - start;
       if (path.startsWith("/api")) {
-        let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-        if (capturedJsonResponse) {
-          logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-        }
-
-        if (logLine.length > 80) {
-          logLine = logLine.slice(0, 79) + "…";
-        }
-
-        log(logLine);
+        const logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+        console.log(logLine);
       }
     });
 
@@ -87,8 +72,7 @@ app.get('/api/health', async (req, res) => {
   } catch (error) {
     res.status(500).json({ 
       status: 'ERROR', 
-      message: 'Health check failed',
-      error: process.env.NODE_ENV === 'development' ? error : undefined
+      message: 'Health check failed'
     });
   }
 });
@@ -102,10 +86,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   const status = err.status || err.statusCode || 500;
   const message = err.message || "Internal Server Error";
 
-  res.status(status).json({ 
-    message, 
-    error: process.env.NODE_ENV === 'development' ? err.stack : undefined 
-  });
+  res.status(status).json({ message });
 });
 
 // Gestionnaire de route non trouvée
@@ -113,22 +94,18 @@ app.use((_req: Request, res: Response) => {
   res.status(404).json({ message: "Route not found" });
 });
 
-// Tester la connexion à la base de données au démarrage
-(async () => {
-  try {
-    await testConnection();
-    console.log('Database connection verified at startup');
-  } catch (error) {
-    console.error('Failed to connect to database at startup:', error);
-    // Nous ne quittons pas l'application mais nous enregistrons l'erreur
-  }
-})();
-
 // En mode développement, configurer Vite
 if (process.env.NODE_ENV === "development") {
   // Créer le serveur HTTP uniquement en développement
   const server = app.listen(5000, () => {
     console.log(`Server started on port 5000`);
+    
+    // Tester la connexion à la base de données au démarrage en développement
+    testConnection().then(connected => {
+      console.log(`Database connection test: ${connected ? 'successful' : 'failed'}`);
+    }).catch(err => {
+      console.error('Database connection test error:', err);
+    });
   });
   setupVite(app, server);
 } else {
