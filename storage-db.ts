@@ -1,5 +1,5 @@
 import { users, type User, type InsertUser, products, type Product, type InsertProduct, orders, type Order, type InsertOrder, orderItems, type OrderItem, type InsertOrderItem, type Stats } from "@shared/schema";
-import { db } from "./db";
+import { db } from "./db"; // Importing db with any type from db.ts
 import { eq, and, desc, sql } from "drizzle-orm";
 import session from "express-session";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
@@ -111,16 +111,16 @@ export class DatabaseStorage implements IStorage {
 
   async createUser(user: InsertUser): Promise<User> {
     // Hash the password if it's not already hashed
-    let userToInsert = { ...user };
+    let userToInsert: InsertUser = { ...user };
     if (userToInsert.password && !userToInsert.password.includes('.')) {
       userToInsert.password = await hashPassword(userToInsert.password);
     }
     
-    const [result] = await db
+    const [newUser]: User[] = await db
       .insert(users)
       .values(userToInsert)
       .returning();
-    return result;
+    return newUser;
   }
   
   async getAllUsers(): Promise<User[]> {
@@ -128,7 +128,7 @@ export class DatabaseStorage implements IStorage {
   }
   
   async deleteUser(id: number): Promise<boolean> {
-    const result = await db
+    const result: { id: number }[] = await db
       .delete(users)
       .where(eq(users.id, id))
       .returning({ id: users.id });
@@ -137,18 +137,15 @@ export class DatabaseStorage implements IStorage {
 
   // Product operations
   async createProduct(product: InsertProduct): Promise<Product> {
-    const [result] = await db
+    const [newProduct]: Product[] = await db
       .insert(products)
       .values(product)
       .returning();
-    return result;
+    return newProduct;
   }
   
   async getProduct(id: number): Promise<Product | undefined> {
-    const result = await db
-      .select()
-      .from(products)
-      .where(eq(products.id, id));
+    const result: Product[] = await db.select().from(products).where(eq(products.id, id));
     return result[0];
   }
   
@@ -223,7 +220,7 @@ export class DatabaseStorage implements IStorage {
   // Order operations
   async createOrder(insertOrder: InsertOrder, items: InsertOrderItem[]): Promise<Order> {
     // Start a transaction
-    return await db.transaction(async (tx) => {
+    return await db.transaction(async (tx: any) => {
       // Create the order
       const [order] = await tx
         .insert(orders)
@@ -355,7 +352,7 @@ export class DatabaseStorage implements IStorage {
     
     // Calculate sales by month
     const salesByMonth: Record<string, number> = {};
-    allOrders.forEach(order => {
+    allOrders.forEach((order: any) => {
       const month = order.createdAt.toLocaleString('fr-FR', { month: 'long', year: 'numeric' });
       salesByMonth[month] = (salesByMonth[month] || 0) + order.totalAmount;
     });
@@ -373,7 +370,7 @@ export class DatabaseStorage implements IStorage {
     
     // Get product details for popular products
     const popularProducts = await Promise.all(
-      popularProductsResult.map(async (item) => {
+      popularProductsResult.map(async (item: { productId: number; totalSales: number }) => {
         const [product] = await db
           .select()
           .from(products)
@@ -388,7 +385,7 @@ export class DatabaseStorage implements IStorage {
     );
     
     // Calculate total sales
-    const totalSales = allOrders.reduce((sum, order) => sum + order.totalAmount, 0);
+    const totalSales = allOrders.reduce((sum: number, order: any) => sum + order.totalAmount, 0);
     
     return {
       salesByMonth,

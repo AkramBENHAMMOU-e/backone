@@ -170,40 +170,40 @@ export function registerRoutes(app: Express): void {
   // CART ROUTES
   
   // Initialiser le panier dans la session pour les utilisateurs non connectés
-  const initGuestCart = (req) => {
-    if (!req.session.guestCart) {
-      // Stocker le panier comme un objet JS standard (pas de Map) dans la session
-      req.session.guestCart = {};
+  function initGuestCart(req: Request) {
+    // Si l'utilisateur n'est pas connecté, utiliser un panier invité stocké dans la session
+    if (!req.isAuthenticated() && !(req.session as any).guestCart) {
+      (req.session as any).guestCart = {};
     }
-    return req.session.guestCart;
-  };
+    return (req.session as any).guestCart || {};
+  }
   
   // Convertir l'objet du panier en Map pour utilisation dans l'API
-  const objectToMap = (obj) => {
-    // Créer une nouvelle Map à partir de l'objet
-    const map = new Map();
-    for (const [key, value] of Object.entries(obj)) {
-      // Convertir les clés en nombres (car les productId sont des nombres)
-      map.set(parseInt(key), value);
+  function objectToMap(obj: Record<string, number>) {
+    // Obj = { productId: quantity, productId: quantity, ... }
+    const map = new Map<number, number>();
+    if (!obj) return map;
+    
+    for (const [productId, quantity] of Object.entries(obj)) {
+      map.set(parseInt(productId), quantity);
     }
     return map;
-  };
+  }
   
   // Convertir la Map en objet pour le stockage dans la session
-  const mapToObject = (map) => {
-    if (!(map instanceof Map)) {
-      return map; // Si ce n'est pas une Map, on retourne l'objet tel quel
-    }
+  function mapToObject(map: Map<number, number>) {
+    // Map = productId -> quantity
+    const obj: Record<number, number> = {};
+    if (!map) return obj;
     
-    const obj = {};
-    for (const [key, value] of map.entries()) {
-      obj[key] = value;
+    for (const [productId, quantity] of map.entries()) {
+      obj[productId] = quantity;
     }
     return obj;
-  };
+  }
   
   // Get cart (works for both authenticated and unauthenticated users)
-  app.get("/api/cart", async (req, res) => {
+  app.get("/api/cart", async (req: Request, res: Response) => {
     try {
       if (req.isAuthenticated()) {
         // Utilisateur connecté - récupérer le panier depuis le stockage
@@ -248,7 +248,7 @@ export function registerRoutes(app: Express): void {
   });
   
   // Add item to cart
-  app.post("/api/cart", validateBody(cartItemSchema), async (req, res) => {
+  app.post("/api/cart", validateBody(cartItemSchema), async (req: Request, res: Response) => {
     try {
       const { productId, quantity } = req.body;
       
@@ -290,7 +290,7 @@ export function registerRoutes(app: Express): void {
         guestCart[productId] = currentQty + quantity;
         
         // Sauvegarder le panier dans la session
-        req.session.guestCart = guestCart;
+        (req.session as any).guestCart = guestCart;
         
         // Préparer la réponse avec les détails du produit
         const cartItems = [];
@@ -314,7 +314,7 @@ export function registerRoutes(app: Express): void {
   });
   
   // Remove item from cart
-  app.delete("/api/cart/:productId", async (req, res) => {
+  app.delete("/api/cart/:productId", async (req: Request, res: Response) => {
     try {
       const productId = parseInt(req.params.productId);
       if (isNaN(productId)) {
@@ -346,7 +346,7 @@ export function registerRoutes(app: Express): void {
         // Utilisateur non connecté - utiliser le panier de session
         const guestCart = initGuestCart(req);
         delete guestCart[productId]; // Supprimer la propriété
-        req.session.guestCart = guestCart;
+        (req.session as any).guestCart = guestCart;
         
         // Préparer la réponse avec les détails du produit
         const cartItems = [];
@@ -370,14 +370,14 @@ export function registerRoutes(app: Express): void {
   });
   
   // Clear cart
-  app.delete("/api/cart", async (req, res) => {
+  app.delete("/api/cart", async (req: Request, res: Response) => {
     try {
       if (req.isAuthenticated()) {
         // Utilisateur connecté - utiliser le stockage persistant
         await storage.clearCart(req.user.id);
       } else {
         // Utilisateur non connecté - utiliser le panier de session
-        req.session.guestCart = {}; // Objet vide, pas de Map
+        (req.session as any).guestCart = {}; // Objet vide, pas de Map
       }
       res.sendStatus(204);
     } catch (error) {
@@ -389,7 +389,7 @@ export function registerRoutes(app: Express): void {
   // ORDER ROUTES
   
   // Create order
-  app.post("/api/orders", async (req, res) => {
+  app.post("/api/orders", async (req: Request, res: Response) => {
     try {
       const { 
         customerName, 
@@ -502,7 +502,7 @@ export function registerRoutes(app: Express): void {
       if (isAuthenticated) {
         await storage.clearCart(req.user.id);
       } else {
-        req.session.guestCart = {};
+        (req.session as any).guestCart = {};
       }
       
       res.status(201).json(order);

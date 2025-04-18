@@ -11,8 +11,9 @@ const DATABASE_URL = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_
 
 console.log('Connexion à la base de données avec URL:', DATABASE_URL);
 
-let sql;
-let db;
+// Define the type for sql client
+let sql: any;
+let db: any;
 
 // Créer la connexion avec neon
 try {
@@ -24,7 +25,7 @@ try {
   console.error('Failed to initialize database connection:', error);
   
   // Créer une implémentation de secours pour éviter les erreurs
-  const mockSql = async () => { 
+  const mockSql = async (): Promise<any> => { 
     console.error('Using fallback mock database connection due to initialization error.');
     throw new Error('Database connection failed during initialization');
   };
