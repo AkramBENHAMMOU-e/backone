@@ -1,97 +1,121 @@
-import dotenv from 'dotenv';
-dotenv.config();
-import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+import express from 'express';
 import cors from 'cors';
-import session from 'express-session';
-import MemoryStore from 'memorystore';
 
-const MemoryStoreSession = MemoryStore(session);
-
-// Créer l'application Express
+// Création de l'application Express
 const app = express();
 
-// Configuration CORS pour autoriser les requêtes depuis le frontend
+// Middleware CORS
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://sportmarocshop.vercel.app', 'https://sportmarocshop-git-main-yourusername.vercel.app'] 
-    : 'http://localhost:3000',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  origin: '*', // Autorise toutes les origines pour les tests
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Configuration de session compatible avec Vercel Serverless
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'sportmarocshop-secret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 24 * 60 * 60 * 1000 // 24 heures
-  },
-  store: new MemoryStoreSession({
-    checkPeriod: 86400000 // 24 heures en millisecondes
-  })
-}));
-
+// Middleware pour parser le JSON
 app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+// Route de test simple
+app.get('/api/hello', (req, res) => {
+  res.json({ message: 'Hello from SportMarocShop API!' });
+});
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
+// Route produits (données en dur pour le test)
+app.get('/api/products', (req, res) => {
+  const products = [
+    {
+      id: 1,
+      name: "Protéine Whey Premium",
+      description: "Supplément riche en protéines pour la récupération musculaire",
+      price: 34900,
+      imageUrl: "https://images.unsplash.com/photo-1594498653385-d5172c532c00?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&h=400&q=80",
+      category: "supplement",
+      subcategory: "proteine",
+      stock: 50,
+      featured: true,
+      discount: 0
+    },
+    {
+      id: 2,
+      name: "Vitamines Multi-Complex",
+      description: "Complément multivitaminé pour le bien-être quotidien",
+      price: 19900,
+      imageUrl: "https://images.unsplash.com/photo-1581009137042-c552e485697a?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&h=400&q=80",
+      category: "supplement",
+      subcategory: "vitamine",
+      stock: 30,
+      featured: true,
+      discount: 15
     }
-  });
-
-  next();
+  ];
+  
+  res.json(products);
 });
 
-// Initialiser les routes
-registerRoutes(app);
-
-// Gestionnaire d'erreurs global
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  const status = err.status || err.statusCode || 500;
-  const message = err.message || "Internal Server Error";
-
-  res.status(status).json({ message });
-  console.error("Error:", err);
+// Route produits mis en avant
+app.get('/api/products/featured', (req, res) => {
+  const featuredProducts = [
+    {
+      id: 1,
+      name: "Protéine Whey Premium",
+      description: "Supplément riche en protéines pour la récupération musculaire",
+      price: 34900,
+      imageUrl: "https://images.unsplash.com/photo-1594498653385-d5172c532c00?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&h=400&q=80",
+      category: "supplement",
+      subcategory: "proteine",
+      stock: 50,
+      featured: true,
+      discount: 0
+    }
+  ];
+  
+  res.json(featuredProducts);
 });
 
-// En mode développement, configurer Vite
-if (process.env.NODE_ENV === "development") {
-  // Créer le serveur HTTP uniquement en développement
-  const server = app.listen(5000, () => {
-    console.log(`Server started on port 5000`);
-  });
-  setupVite(app, server);
-} else {
-  // En production sur Vercel, pas besoin de créer le serveur HTTP
-  serveStatic(app);
-}
+// Route panier (vide pour le test)
+app.get('/api/cart', (req, res) => {
+  res.json([]);
+});
 
-// Exporter l'app Express pour Vercel
+// Route utilisateur (non authentifié)
+app.get('/api/user', (req, res) => {
+  res.status(401).json({ message: "Non authentifié" });
+});
+
+// Route pour la page d'accueil / test
+app.get('/', (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <title>SportMarocShop API</title>
+        <style>
+          body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; }
+          h1 { color: #e00; }
+          pre { background: #f5f5f5; padding: 1rem; border-radius: 4px; }
+        </style>
+      </head>
+      <body>
+        <h1>SportMarocShop API</h1>
+        <p>L'API fonctionne correctement. Endpoints disponibles :</p>
+        <ul>
+          <li><a href="/api/hello">/api/hello</a> - Test simple</li>
+          <li><a href="/api/products">/api/products</a> - Liste des produits</li>
+          <li><a href="/api/products/featured">/api/products/featured</a> - Produits mis en avant</li>
+          <li><a href="/api/cart">/api/cart</a> - Panier (vide)</li>
+          <li><a href="/api/user">/api/user</a> - Utilisateur (non authentifié)</li>
+        </ul>
+      </body>
+    </html>
+  `);
+});
+
+// Gestion d'erreur générale
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(500).json({ 
+    message: "Erreur interne du serveur",
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
+});
+
+// Export pour Vercel
 export default app;
