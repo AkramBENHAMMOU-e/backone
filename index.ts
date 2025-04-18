@@ -21,8 +21,7 @@ const app = express();
 
 // --- CORS Configuration ---
 const allowedOrigins = [
-  'https://sportmarocshop.vercel.app',
-  'https://sportmarocshop-git-main-yourusername.vercel.app',
+  'https://frantone.vercel.app',
   'http://localhost:3000'
 ];
 
