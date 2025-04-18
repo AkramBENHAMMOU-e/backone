@@ -110,9 +110,20 @@ import { drizzle } from "drizzle-orm/neon-http";
 import ws from "ws";
 neonConfig.webSocketConstructor = ws;
 neonConfig.fetchConnectionCache = true;
+neonConfig.useSecureWebSocket = true;
 var DATABASE_URL = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_GkyWtclF76xe@ep-muddy-scene-a2dyqp50-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require";
-var sql = neon(DATABASE_URL);
-var db = drizzle(sql, { schema: schema_exports });
+console.log("Connexion \xE0 la base de donn\xE9es avec URL:", DATABASE_URL);
+var sql;
+var db;
+try {
+  sql = neon(DATABASE_URL);
+  db = drizzle(sql, { schema: schema_exports });
+} catch (error) {
+  console.error("Failed to initialize database connection:", error);
+  const mockSql = async () => [];
+  sql = mockSql;
+  db = drizzle(mockSql, { schema: schema_exports });
+}
 async function testConnection() {
   try {
     const result = await sql`SELECT 1 as connection_test`;
@@ -1021,6 +1032,7 @@ app.use(cors({
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
 }));
+app.options("*", cors());
 app.use(session3({
   secret: process.env.SESSION_SECRET || "sportmarocshop-secret",
   resave: false,
@@ -1039,44 +1051,64 @@ app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: false, limit: "5mb" }));
 app.use((req, res, next) => {
   try {
+    console.log(`${(/* @__PURE__ */ new Date()).toISOString()} - ${req.method} ${req.path}`);
     const start = Date.now();
     const path = req.path;
     res.on("finish", () => {
       const duration = Date.now() - start;
-      if (path.startsWith("/api")) {
-        const logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-        console.log(logLine);
-      }
+      console.log(`${(/* @__PURE__ */ new Date()).toISOString()} - ${req.method} ${path} ${res.statusCode} in ${duration}ms`);
     });
     next();
   } catch (error) {
+    console.error("Middleware error:", error);
     next(error);
   }
 });
 app.get("/api/health", async (req, res) => {
   try {
     const dbConnected = await testConnection();
-    res.status(200).json({
+    const responseData = {
       status: "OK",
       environment: process.env.NODE_ENV,
-      database: dbConnected ? "connected" : "disconnected"
-    });
+      database: dbConnected ? "connected" : "disconnected",
+      serverTime: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    console.log("Health check response:", responseData);
+    res.status(200).json(responseData);
   } catch (error) {
+    console.error("Health check error:", error);
     res.status(500).json({
       status: "ERROR",
-      message: "Health check failed"
+      message: "Health check failed",
+      error: String(error)
     });
   }
 });
-registerRoutes(app);
-app.use((err, _req, res, _next) => {
+try {
+  registerRoutes(app);
+  console.log("Routes registered successfully");
+} catch (error) {
+  console.error("Failed to register routes:", error);
+}
+app.use((err, req, res, _next) => {
   console.error("Error caught by global error handler:", err);
+  console.error("Request path:", req.path);
+  console.error("Request method:", req.method);
+  console.error("Request headers:", req.headers);
   const status = err.status || err.statusCode || 500;
   const message = err.message || "Internal Server Error";
-  res.status(status).json({ message });
+  res.status(status).json({
+    message,
+    path: req.path,
+    timestamp: (/* @__PURE__ */ new Date()).toISOString()
+  });
 });
-app.use((_req, res) => {
-  res.status(404).json({ message: "Route not found" });
+app.use((req, res) => {
+  console.log(`Route not found: ${req.method} ${req.path}`);
+  res.status(404).json({
+    message: "Route not found",
+    path: req.path
+  });
 });
 if (process.env.NODE_ENV === "development") {
   const server = app.listen(5e3, () => {
@@ -1090,7 +1122,14 @@ if (process.env.NODE_ENV === "development") {
   setupVite(app, server);
 } else {
   serveStatic(app);
+  console.log("Server configured for production on Vercel");
 }
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught Exception:", error);
+});
 var index_default = app;
 export {
   index_default as default
