@@ -1,6 +1,6 @@
 import { neon, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
-import * as schema from '@shared/schema.js';
+import * as schema from '@shared/schema';
 
 // Configuration pour Neon Database en environnement serverless
 // Pas besoin de WebSocket pour le driver HTTP

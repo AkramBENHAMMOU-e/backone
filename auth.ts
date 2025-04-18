@@ -5,7 +5,7 @@ import session from "express-session";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { storage } from "./storage-db.js"; // Utiliser le stockage avec base de données
-import { User as SelectUser } from "@shared/schema.js";
+import { User as SelectUser } from "@shared/schema"; // Removed .js extension
 
 declare global {
   namespace Express {
