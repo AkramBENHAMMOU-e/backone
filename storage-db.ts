@@ -219,48 +219,47 @@ export class DatabaseStorage implements IStorage {
 
   // Order operations
   async createOrder(insertOrder: InsertOrder, items: Omit<InsertOrderItem, "orderId">[]): Promise<Order> {
-    // Start a transaction
-    return await db.transaction(async (tx: any) => {
-      // Create the order
-      const [order] = await tx
-        .insert(orders)
-        .values(insertOrder)
-        .returning();
-      
-      // Create the order items with the order ID
-      const orderItemsWithOrderId = items.map(item => ({
-        ...item,
-        orderId: order.id
-      }));
-      
-      await tx
-        .insert(orderItems)
-        .values(orderItemsWithOrderId);
-      
-      // Update product stocks
-      for (const item of items) {
-        const [product] = await tx
-          .select()
-          .from(products)
-          .where(eq(products.id, item.productId));
-        
-        if (!product) {
-          throw new Error(`Product with ID ${item.productId} not found`);
-        }
-        
-        const newStock = product.stock - item.quantity;
-        if (newStock < 0) {
-          throw new Error(`Insufficient stock for product ${product.name}`);
-        }
-        
-        await tx
-          .update(products)
-          .set({ stock: newStock })
-          .where(eq(products.id, item.productId));
+    // 1. Insert the order
+    const [order] = await db
+      .insert(orders)
+      .values(insertOrder)
+      .returning();
+
+    if (!order) throw new Error("Order creation failed");
+
+    // 2. Insert order items with the order ID
+    const orderItemsWithOrderId = items.map(item => ({
+      ...item,
+      orderId: order.id
+    }));
+
+    await db
+      .insert(orderItems)
+      .values(orderItemsWithOrderId);
+
+    // 3. Update product stocks
+    for (const item of items) {
+      const [product] = await db
+        .select()
+        .from(products)
+        .where(eq(products.id, item.productId));
+
+      if (!product) {
+        throw new Error(`Product with ID ${item.productId} not found`);
       }
-      
-      return order;
-    });
+
+      const newStock = product.stock - item.quantity;
+      if (newStock < 0) {
+        throw new Error(`Insufficient stock for product ${product.name}`);
+      }
+
+      await db
+        .update(products)
+        .set({ stock: newStock })
+        .where(eq(products.id, item.productId));
+    }
+
+    return order;
   }
   
   async getOrder(id: number): Promise<{ order: Order; items: OrderItem[] } | undefined> {
