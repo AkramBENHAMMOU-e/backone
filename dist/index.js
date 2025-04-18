@@ -105,27 +105,18 @@ var statsSchema = z.object({
 });
 
 // db.ts
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-serverless";
+import { neon, neonConfig } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
 import ws from "ws";
 neonConfig.webSocketConstructor = ws;
+neonConfig.fetchConnectionCache = true;
 var DATABASE_URL = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_GkyWtclF76xe@ep-muddy-scene-a2dyqp50-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require";
-var pool = new Pool({
-  connectionString: DATABASE_URL,
-  max: 10,
-  idleTimeoutMillis: 3e4,
-  connectionTimeoutMillis: 5e3
-});
-pool.on("error", (err) => {
-  console.error("Unexpected error on idle database client", err);
-  process.exit(-1);
-});
-var db = drizzle(pool, { schema: schema_exports });
+var sql = neon(DATABASE_URL);
+var db = drizzle(sql, { schema: schema_exports });
 async function testConnection() {
   try {
-    const client = await pool.connect();
-    client.release();
-    console.log("Database connection successful");
+    const result = await sql`SELECT 1 as connection_test`;
+    console.log("Database connection successful", result);
     return true;
   } catch (error) {
     console.error("Database connection error:", error);
@@ -134,27 +125,27 @@ async function testConnection() {
 }
 
 // storage-db.ts
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql as sql2 } from "drizzle-orm";
 import session from "express-session";
-import connectPg from "connect-pg-simple";
 import { scrypt, randomBytes } from "crypto";
 import { promisify } from "util";
+import MemoryStore from "memorystore";
 var scryptAsync = promisify(scrypt);
+var MemoryStoreSession = MemoryStore(session);
 async function hashPassword(password) {
   const salt = randomBytes(16).toString("hex");
   const buf = await scryptAsync(password, salt, 64);
   return `${buf.toString("hex")}.${salt}`;
 }
-var PostgresSessionStore = connectPg(session);
 var DatabaseStorage = class {
   // In-memory storage for cart since we don't have a cart table yet
   carts;
   sessionStore;
   constructor() {
     this.carts = {};
-    this.sessionStore = new PostgresSessionStore({
-      pool,
-      createTableIfMissing: true
+    this.sessionStore = new MemoryStoreSession({
+      checkPeriod: 864e5
+      // 24 heures en millisecondes
     });
     this.getUserByUsername("admin").then((user) => {
       if (!user) {
@@ -307,7 +298,7 @@ var DatabaseStorage = class {
   // Stats operations
   async getStats() {
     const allOrders = await db.select().from(orders);
-    const totalCustomersResult = await db.select({ count: sql`count(*)` }).from(users).where(eq(users.isAdmin, false));
+    const totalCustomersResult = await db.select({ count: sql2`count(*)` }).from(users).where(eq(users.isAdmin, false));
     const totalCustomers = totalCustomersResult[0].count;
     const salesByMonth = {};
     allOrders.forEach((order) => {
@@ -316,8 +307,8 @@ var DatabaseStorage = class {
     });
     const popularProductsResult = await db.select({
       productId: orderItems.productId,
-      totalSales: sql`sum(${orderItems.quantity})`
-    }).from(orderItems).groupBy(orderItems.productId).orderBy(desc(sql`sum(${orderItems.quantity})`)).limit(5);
+      totalSales: sql2`sum(${orderItems.quantity})`
+    }).from(orderItems).groupBy(orderItems.productId).orderBy(desc(sql2`sum(${orderItems.quantity})`)).limit(5);
     const popularProducts = await Promise.all(
       popularProductsResult.map(async (item) => {
         const [product] = await db.select().from(products).where(eq(products.id, item.productId));
@@ -1020,9 +1011,9 @@ function serveStatic(app2) {
 // index.ts
 import cors from "cors";
 import session3 from "express-session";
-import MemoryStore from "memorystore";
+import MemoryStore2 from "memorystore";
 dotenv.config();
-var MemoryStoreSession = MemoryStore(session3);
+var MemoryStoreSession2 = MemoryStore2(session3);
 var app = express();
 app.use(cors({
   origin: process.env.NODE_ENV === "production" ? ["https://sportmarocshop.vercel.app", "https://sportmarocshop-git-main-yourusername.vercel.app"] : "http://localhost:3000",
@@ -1039,7 +1030,7 @@ app.use(session3({
     maxAge: 24 * 60 * 60 * 1e3
     // 24 heures
   },
-  store: new MemoryStoreSession({
+  store: new MemoryStoreSession2({
     checkPeriod: 864e5
     // 24 heures en millisecondes
   })

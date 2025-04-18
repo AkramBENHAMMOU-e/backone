@@ -1,12 +1,13 @@
 import { users, type User, type InsertUser, products, type Product, type InsertProduct, orders, type Order, type InsertOrder, orderItems, type OrderItem, type InsertOrderItem, type Stats } from "@shared/schema";
-import { db, pool } from "./db";
+import { db } from "./db";
 import { eq, and, desc, sql } from "drizzle-orm";
 import session from "express-session";
-import connectPg from "connect-pg-simple";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
+import MemoryStore from 'memorystore';
 
 const scryptAsync = promisify(scrypt);
+const MemoryStoreSession = MemoryStore(session);
 
 // Fonction pour hacher un mot de passe
 async function hashPassword(password: string) {
@@ -14,9 +15,6 @@ async function hashPassword(password: string) {
   const buf = (await scryptAsync(password, salt, 64)) as Buffer;
   return `${buf.toString("hex")}.${salt}`;
 }
-
-// PostgreSQL session store
-const PostgresSessionStore = connectPg(session);
 
 // Cart storage type 
 type CartStorage = {
@@ -70,9 +68,9 @@ export class DatabaseStorage implements IStorage {
   
   constructor() {
     this.carts = {};
-    this.sessionStore = new PostgresSessionStore({ 
-      pool, 
-      createTableIfMissing: true 
+    // Utiliser MemoryStore au lieu de PostgreSQL pour la compatibilité avec Vercel
+    this.sessionStore = new MemoryStoreSession({
+      checkPeriod: 86400000 // 24 heures en millisecondes
     });
     
     // Check if admin user exists, if not create it
