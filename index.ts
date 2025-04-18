@@ -6,7 +6,8 @@ const app = express();
 
 // Middleware CORS
 app.use(cors({
-  origin: '*', // Autorise toutes les origines pour les tests
+  origin: ['http://localhost:3000', 'https://sportmarocshop.vercel.app'], // Origines spécifiques au lieu de '*'
+  credentials: true, // Autoriser l'envoi de cookies
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
