@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
-import { setupAuth } from "./auth";
-import { storage } from "./storage-db"; // Utiliser la base de données au lieu du stockage en mémoire
-import { insertProductSchema, insertOrderSchema, insertOrderItemSchema, cartItemSchema } from "@shared/schema";
+import { setupAuth } from "./auth.js";
+import { storage } from "./storage-db.js"; // Utiliser la base de données au lieu du stockage en mémoire
+import { insertProductSchema, insertOrderSchema, insertOrderItemSchema, cartItemSchema } from "@shared/schema.js";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
 import { v2 as cloudinary } from 'cloudinary';

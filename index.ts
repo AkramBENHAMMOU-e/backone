@@ -1,12 +1,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+import { registerRoutes } from "./routes.js";
+import { setupVite, serveStatic, log } from "./vite.js";
 import cors from 'cors';
 import session from 'express-session';
 import MemoryStore from 'memorystore';
-import { testConnection } from './db';
+import { testConnection } from './db.js';
 
 const MemoryStoreSession = MemoryStore(session);
 
