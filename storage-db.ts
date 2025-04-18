@@ -1,4 +1,4 @@
-import { users, type User, type InsertUser, products, type Product, type InsertProduct, orders, type Order, type InsertOrder, orderItems, type OrderItem, type InsertOrderItem, type Stats } from "@shared/schema";
+import { users, type User, type InsertUser, products, type Product, type InsertProduct, orders, type Order, type InsertOrder, orderItems, type OrderItem, type InsertOrderItem, type Stats } from "./shared/schema.js";
 import { db } from "./db.js"; // Importing db with any type from db.ts
 import { eq, and, desc, sql } from "drizzle-orm";
 import session from "express-session";
