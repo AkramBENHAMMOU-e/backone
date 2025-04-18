@@ -13,11 +13,22 @@ const MemoryStoreSession = MemoryStore(session);
 // Créer l'application Express
 const app = express();
 
-// Configuration CORS pour autoriser les requêtes depuis le frontend
+// --- CORS Configuration ---
+const allowedOrigins = [
+  'https://sportmarocshop.vercel.app',
+  'https://sportmarocshop-git-main-yourusername.vercel.app',
+  'http://localhost:3000'
+];
+
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://sportmarocshop.vercel.app', 'https://sportmarocshop-git-main-yourusername.vercel.app'] 
-    : 'http://localhost:3000',
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'), false);
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
