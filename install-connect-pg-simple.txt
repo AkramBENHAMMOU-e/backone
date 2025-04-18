@@ -1,0 +1,2 @@
+# Run this command in your terminal to install connect-pg-simple:
+npm install connect-pg-simple

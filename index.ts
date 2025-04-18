@@ -5,10 +5,16 @@ import { registerRoutes } from "./routes.js";
 import { setupVite, serveStatic, log } from "./vite.js";
 import cors from 'cors';
 import session from 'express-session';
-import MemoryStore from 'memorystore';
+import pg from 'pg';
+import connectPgSimple from 'connect-pg-simple';
 import { testConnection } from './db.js';
 
-const MemoryStoreSession = MemoryStore(session);
+const PgSession = connectPgSimple(session);
+
+const pgPool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
 // Créer l'application Express
 const app = express();
@@ -39,16 +45,19 @@ app.options('*', cors());
 
 // --- Session Configuration ---
 app.use(session({
+  store: new PgSession({
+    pool: pgPool,
+    tableName: 'session'
+  }),
   secret: process.env.SESSION_SECRET || 'sportmarocshop-secret',
   resave: false,
   saveUninitialized: false,
-  store: new MemoryStoreSession({ checkPeriod: 86400000 }),
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 1000 * 60 * 60 * 24, // 1 day
-  },
+    maxAge: 1000 * 60 * 60 * 24 * 30 // 30 days
+  }
 }));
 
 app.use(express.json({ limit: '5mb' }));
