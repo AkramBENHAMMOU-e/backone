@@ -6,6 +6,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import cors from 'cors';
 import session from 'express-session';
 import MemoryStore from 'memorystore';
+import { testConnection } from './db';
 
 const MemoryStoreSession = MemoryStore(session);
 
@@ -39,34 +40,57 @@ app.use(session({
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Middleware de logging
 app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  try {
+    const start = Date.now();
+    const path = req.path;
+    let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+    const originalResJson = res.json;
+    res.json = function (bodyJson, ...args) {
+      capturedJsonResponse = bodyJson;
+      return originalResJson.apply(res, [bodyJson, ...args]);
+    };
 
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+    res.on("finish", () => {
+      const duration = Date.now() - start;
+      if (path.startsWith("/api")) {
+        let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+        if (capturedJsonResponse) {
+          logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        }
+
+        if (logLine.length > 80) {
+          logLine = logLine.slice(0, 79) + "…";
+        }
+
+        log(logLine);
       }
+    });
 
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
-      log(logLine);
-    }
-  });
-
-  next();
+// Route de vérification d'état pour Vercel
+app.get('/api/health', async (req, res) => {
+  try {
+    const dbConnected = await testConnection();
+    res.status(200).json({ 
+      status: 'OK', 
+      environment: process.env.NODE_ENV,
+      database: dbConnected ? 'connected' : 'disconnected'
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'ERROR', 
+      message: 'Health check failed',
+      error: process.env.NODE_ENV === 'development' ? error : undefined
+    });
+  }
 });
 
 // Initialiser les routes
@@ -74,12 +98,31 @@ registerRoutes(app);
 
 // Gestionnaire d'erreurs global
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("Error caught by global error handler:", err);
   const status = err.status || err.statusCode || 500;
   const message = err.message || "Internal Server Error";
 
-  res.status(status).json({ message });
-  console.error("Error:", err);
+  res.status(status).json({ 
+    message, 
+    error: process.env.NODE_ENV === 'development' ? err.stack : undefined 
+  });
 });
+
+// Gestionnaire de route non trouvée
+app.use((_req: Request, res: Response) => {
+  res.status(404).json({ message: "Route not found" });
+});
+
+// Tester la connexion à la base de données au démarrage
+(async () => {
+  try {
+    await testConnection();
+    console.log('Database connection verified at startup');
+  } catch (error) {
+    console.error('Failed to connect to database at startup:', error);
+    // Nous ne quittons pas l'application mais nous enregistrons l'erreur
+  }
+})();
 
 // En mode développement, configurer Vite
 if (process.env.NODE_ENV === "development") {
