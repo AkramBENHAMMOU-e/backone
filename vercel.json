@@ -3,12 +3,21 @@
   "builds": [
     {
       "src": "index.ts",
+      "use": "@vercel/node@2.15.10",
+      "config": {
+        "buildCommand": "npm run build && node vercel-build.js"
+      }
+    },
+    {
+      "src": "dist-fallback.js",
       "use": "@vercel/node@2.15.10"
     }
   ],
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "index.ts" },
-    { "source": "/(.*)", "destination": "index.ts" }
+  "routes": [
+    { "src": "/api/(.*)", "dest": "index.ts", "continue": true },
+    { "src": "/api/(.*)", "dest": "dist-fallback.js", "status": 503 },
+    { "src": "/(.*)", "dest": "index.ts", "continue": true },
+    { "src": "/(.*)", "dest": "dist-fallback.js", "status": 200 }
   ],
   "headers": [
     {
