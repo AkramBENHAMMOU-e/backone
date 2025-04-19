@@ -641,6 +641,79 @@ export function registerRoutes(app: Express): void {
     }
   });
 
+  // =========================
+  // ADMIN PROFILE UPDATE (admin only)
+  // =========================
+  app.put("/api/admin/profile", isAdmin, async (req: Request, res: Response) => {
+    try {
+      const { email, password, confirmPassword, currentPassword } = req.body;
+      // Vérification côté backend : mot de passe et confirmation doivent correspondre
+      if (password && password !== confirmPassword) {
+        return res.status(400).json({ message: "Les mots de passe ne correspondent pas." });
+      }
+      // On ne modifie QUE l'utilisateur connecté (admin)
+      const adminId = req.user.id;
+      const admin = await storage.getUser(adminId);
+      if (!admin || !admin.isAdmin) {
+        return res.status(403).json({ message: "Accès non autorisé" });
+      }
+      // Vérifier si l'email change et s'il est déjà pris
+      if (email && email !== admin.email) {
+        const exists = await storage.getUserByEmail(email);
+        if (exists && exists.id !== adminId) {
+          return res.status(400).json({ message: "Cet email est déjà utilisé." });
+        }
+      }
+      // Si le mot de passe doit être changé, vérifier l'ancien mot de passe
+      if (password && password.length > 0) {
+        if (!currentPassword) {
+          return res.status(400).json({ message: "Le mot de passe actuel est requis." });
+        }
+        // Vérifier que currentPassword correspond au mot de passe actuel de l'admin
+        const { comparePasswords, hashPassword } = await import("./auth.js");
+        const valid = await comparePasswords(currentPassword, admin.password);
+        if (!valid) {
+          return res.status(400).json({ message: "Le mot de passe actuel est incorrect." });
+        }
+        // Hash le nouveau mot de passe uniquement si l'ancien est validé
+        const update: any = {};
+        if (email) update.email = email;
+        if (password && password.length > 0) {
+          update.password = await hashPassword(password);
+        }
+        if (Object.keys(update).length === 0) {
+          return res.status(400).json({ message: "Aucune modification à enregistrer." });
+        }
+        // Appliquer la mise à jour
+        const updated = await storage.updateUser(adminId, update);
+        if (!updated) {
+          return res.status(500).json({ message: "Erreur lors de la mise à jour." });
+        }
+        // Ne jamais renvoyer le mot de passe
+        const { password: _, ...adminSafe } = updated;
+        res.json(adminSafe);
+      } else {
+        // Si aucun mot de passe n'est fourni, mettre à jour uniquement l'email
+        const update: any = {};
+        if (email) update.email = email;
+        if (Object.keys(update).length === 0) {
+          return res.status(400).json({ message: "Aucune modification à enregistrer." });
+        }
+        // Appliquer la mise à jour
+        const updated = await storage.updateUser(adminId, update);
+        if (!updated) {
+          return res.status(500).json({ message: "Erreur lors de la mise à jour." });
+        }
+        // Ne jamais renvoyer le mot de passe
+        const { password: _, ...adminSafe } = updated;
+        res.json(adminSafe);
+      }
+    } catch (error) {
+      console.error("Erreur lors de la mise à jour du profil admin:", error);
+      res.status(500).json({ message: "Erreur serveur" });
+    }
+  });
+
   // Générer une signature Cloudinary pour upload sécurisé
   app.get("/api/cloudinary/signature", (req, res) => {
     try {
