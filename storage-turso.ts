@@ -69,23 +69,38 @@ export class TursoStorage implements IStorage {
   sessionStore: session.Store;
   
   constructor() {
-    // Utiliser MemoryStore au lieu de PostgreSQL pour la compatibilité avec Vercel
+    // Utiliser MemoryStore au lieu de TursoStore
     this.sessionStore = new MemoryStoreSession({
-      checkPeriod: 86400000 // 24 heures en millisecondes
+      checkPeriod: 86400000 // 24 heures (purge des sessions expirées)
     });
     
-    // Check if admin user exists, if not create it
-    this.getUserByUsername("admin").then(user => {
-      if (!user) {
-        this.createUser({
+    // Vérifier si l'utilisateur admin existe déjà, sinon le créer
+    this.initAdminUser();
+  }
+  
+  // Méthode d'initialisation de l'admin
+  private async initAdminUser() {
+    try {
+      // Vérifier si l'utilisateur admin existe déjà
+      const existingAdmin = await this.getUserByEmail("admin@fitmaroc.ma");
+      
+      if (!existingAdmin) {
+        console.log("Aucun utilisateur admin trouvé. Création de l'utilisateur admin...");
+        await this.createUser({
           username: "admin",
           password: "admin123", // This will be hashed
           email: "admin@fitmaroc.ma",
           fullName: "Admin",
           isAdmin: true,
         });
+        console.log("Utilisateur admin créé avec succès!");
+      } else {
+        console.log("Utilisateur admin existant trouvé, aucune création nécessaire.");
       }
-    });
+    } catch (error) {
+      console.error("Erreur lors de l'initialisation de l'utilisateur admin:", error);
+      // Ne pas faire échouer l'initialisation de l'application si la création de l'admin échoue
+    }
   }
   
   // User operations
@@ -113,17 +128,52 @@ export class TursoStorage implements IStorage {
   }
   
   async createUser(user: InsertUser): Promise<User> {
-    // Hash the password if it's not already hashed
-    let userToInsert: InsertUser = { ...user };
-    if (userToInsert.password && !userToInsert.password.includes('.')) {
-      userToInsert.password = await hashPassword(userToInsert.password);
+    try {
+      const hashedPassword = await hashPassword(user.password);
+      
+      // Vérifier si un utilisateur existe déjà avec cet email ou ce nom d'utilisateur
+      const existingUserByEmail = await this.getUserByEmail(user.email);
+      const existingUserByUsername = await this.getUserByUsername(user.username);
+      
+      if (existingUserByEmail) {
+        console.log(`Échec de création d'utilisateur: l'email ${user.email} est déjà utilisé.`);
+        throw new Error("Email already exists");
+      }
+      
+      if (existingUserByUsername) {
+        console.log(`Échec de création d'utilisateur: le nom d'utilisateur ${user.username} est déjà utilisé.`);
+        throw new Error("Username already exists");
+      }
+      
+      // Insérer l'utilisateur
+      const result = await db
+        .insert(users)
+        .values(user)
+        .returning();
+
+      if (result.length === 0) {
+        console.log("Aucune ligne insérée lors de la création de l'utilisateur");
+        throw new Error("User creation failed");
+      }
+
+      // Récupérer l'utilisateur créé
+      const createdUser = result[0];
+      return createdUser;
+    } catch (error) {
+      console.error("Erreur lors de la création d'un utilisateur:", error);
+      
+      // Vérifier si c'est une erreur de contrainte unique
+      const errorMessage = String(error);
+      if (errorMessage.includes("UNIQUE constraint failed")) {
+        if (errorMessage.includes("email")) {
+          console.log(`Erreur de contrainte: l'email ${user.email} est déjà utilisé`);
+        } else if (errorMessage.includes("username")) {
+          console.log(`Erreur de contrainte: le nom d'utilisateur ${user.username} est déjà utilisé`);
+        }
+      }
+      
+      throw error;
     }
-    
-    const result = await db
-      .insert(users)
-      .values(userToInsert)
-      .returning();
-    return result[0];
   }
   
   async updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined> {

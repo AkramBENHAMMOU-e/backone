@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx index.ts",
-    "build": "esbuild index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build": "esbuild index.ts vite.js --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "node dist/index.js",
     "db:push": "tsx db/schema-push.ts",
     "db:migrate": "tsx db/migrate.ts",

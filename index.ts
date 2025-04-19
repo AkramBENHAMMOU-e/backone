@@ -7,13 +7,6 @@ import cors from 'cors';
 import session from 'express-session';
 import { testConnection } from "./db/index.js";
 import { storage } from "./storage-turso.js";
-import MemoryStore from 'memorystore';
-import TursoStore from "./turso-store";
-import { Storage } from "./storage";
-import { db, tursoClient } from "./db";
-import path from "path";
-
-const MemoryStoreSession = MemoryStore(session);
 
 // Créer l'application Express
 const app = express();
