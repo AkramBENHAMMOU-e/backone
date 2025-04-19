@@ -1,10 +1,11 @@
 import type { Express, Request, Response } from "express";
 import { setupAuth } from "./auth.js";
-import { storage } from "./storage-db.js"; // Utiliser la base de données au lieu du stockage en mémoire
-import { insertProductSchema, insertOrderSchema, insertOrderItemSchema, cartItemSchema } from "./shared/schema.js";
+import { storage } from "./storage-turso.js"; // Utiliser le nouveau stockage avec Turso
+import { insertProductSchema, insertOrderSchema, insertOrderItemSchema, cartItemSchema } from "./db/schema.js";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
 import { v2 as cloudinary } from 'cloudinary';
+import { comparePasswords, hashPassword } from "./auth.js"; // Importer directement les fonctions d'authentification
 
 // Configurer Cloudinary - ajoutez ceci après les imports
 cloudinary.config({
@@ -391,16 +392,22 @@ export function registerRoutes(app: Express): void {
   // Create order
   app.post("/api/orders", async (req: Request, res: Response) => {
     try {
+      console.log("Création de commande - Début");
+      console.log("Body reçu:", JSON.stringify(req.body));
+      
       const { 
         customerName, 
         customerEmail, 
         customerPhone, 
         shippingAddress, 
-        userId 
+        userId,
+        cartItems: providedCartItems,
+        totalAmount: providedTotalAmount
       } = req.body;
       
       // Vérifier les informations obligatoires
       if (!customerName || !customerEmail || !customerPhone || !shippingAddress) {
+        console.log("Informations client incomplètes:", { customerName, customerEmail, customerPhone, shippingAddress });
         return res.status(400).json({ 
           message: "Informations client incomplètes. Veuillez fournir nom, email, téléphone et adresse." 
         });
@@ -408,28 +415,51 @@ export function registerRoutes(app: Express): void {
       
       // Identifier l'utilisateur (connecté ou invité)
       const isAuthenticated = req.isAuthenticated();
-      const currentUserId = isAuthenticated ? req.user.id : (userId || null);
+      console.log("Utilisateur authentifié:", isAuthenticated);
+      console.log("User dans la session:", req.user);
       
-      let totalAmount = 0;
-      const orderItems = [];
+      const currentUserId = isAuthenticated ? req.user.id : (userId || null);
+      console.log("ID utilisateur pour la commande:", currentUserId);
+      
+      let totalAmount = providedTotalAmount || 0;
+      let orderItems = [];
+      
+      // Si les données du panier sont fournies, les utiliser directement
+      if (providedCartItems && Array.isArray(providedCartItems) && providedCartItems.length > 0) {
+        console.log("Utilisation des données de panier fournies:", providedCartItems);
+        orderItems = providedCartItems;
+        
+        // Si le montant total n'est pas fourni, le calculer
+        if (!providedTotalAmount) {
+          totalAmount = orderItems.reduce((total, item) => total + (item.priceAtPurchase * item.quantity), 0);
+        }
+      } else {
+        // Sinon, utiliser la méthode habituelle
+        console.log("Aucune donnée de panier fournie, recherche du panier...");
       
       // Différent traitement selon le type d'authentification
       if (isAuthenticated) {
+          console.log("Traitement panier utilisateur authentifié");
         // Pour les utilisateurs connectés, obtenir le panier depuis la base de données
         const cart = await storage.getCart(req.user.id);
+          console.log("Panier récupéré:", Array.from(cart.entries()));
         
         if (cart.size === 0) {
+            console.log("Panier vide pour l'utilisateur:", req.user.id);
           return res.status(400).json({ message: "Le panier est vide" });
         }
         
         // Parcourir les produits du panier
         for (const [productId, quantity] of cart.entries()) {
+            console.log(`Traitement produit #${productId}, quantité:`, quantity);
           const product = await storage.getProduct(productId);
           if (!product) {
+              console.log(`Produit non trouvé: #${productId}`);
             return res.status(400).json({ message: `Produit avec ID ${productId} non trouvé` });
           }
           
           if (product.stock < quantity) {
+              console.log(`Stock insuffisant pour ${product.name}: disponible=${product.stock}, demandé=${quantity}`);
             return res.status(400).json({ message: `Stock insuffisant pour ${product.name}` });
           }
           
@@ -447,10 +477,13 @@ export function registerRoutes(app: Express): void {
           });
         }
       } else {
+          console.log("Traitement panier invité");
         // Pour les utilisateurs non connectés, obtenir le panier depuis la session
         const guestCart = req.session.guestCart || {};
+          console.log("Panier invité:", guestCart);
         
         if (Object.keys(guestCart).length === 0) {
+            console.log("Panier invité vide");
           return res.status(400).json({ message: "Le panier est vide" });
         }
         
@@ -459,13 +492,16 @@ export function registerRoutes(app: Express): void {
           const productId = parseInt(productIdStr);
           // Conversion explicite en nombre
           const quantity = typeof qty === 'number' ? qty : parseInt(String(qty));
+            console.log(`Traitement produit #${productId}, quantité:`, quantity);
           
           const product = await storage.getProduct(productId);
           if (!product) {
+              console.log(`Produit non trouvé: #${productId}`);
             return res.status(400).json({ message: `Produit avec ID ${productId} non trouvé` });
           }
           
           if (product.stock < quantity) {
+              console.log(`Stock insuffisant pour ${product.name}: disponible=${product.stock}, demandé=${quantity}`);
             return res.status(400).json({ message: `Stock insuffisant pour ${product.name}` });
           }
           
@@ -483,8 +519,20 @@ export function registerRoutes(app: Express): void {
           });
         }
       }
+      }
+      
+      // Vérifier que des articles sont présents
+      if (orderItems.length === 0) {
+        console.log("Aucun article dans la commande");
+        return res.status(400).json({ message: "Le panier est vide" });
+      }
+      
+      console.log("Résumé de la commande:");
+      console.log("- Articles:", orderItems);
+      console.log("- Montant total:", totalAmount);
       
       // Créer la commande
+      console.log("Création de la commande dans la base de données...");
       const order = await storage.createOrder(
         {
           userId: currentUserId,
@@ -498,16 +546,24 @@ export function registerRoutes(app: Express): void {
         orderItems
       );
       
+      console.log("Commande créée avec succès:", order);
+      
       // Vider le panier selon le type d'utilisateur
       if (isAuthenticated) {
+        console.log("Nettoyage du panier utilisateur:", req.user.id);
         await storage.clearCart(req.user.id);
       } else {
+        console.log("Nettoyage du panier invité");
         (req.session as any).guestCart = {};
       }
       
       res.status(201).json(order);
     } catch (error) {
       console.error("Error creating order:", error);
+      if (error instanceof Error) {
+        console.error("Error details:", error.message);
+        console.error("Error stack:", error.stack);
+      }
       res.status(500).json({ message: "Erreur lors de la création de la commande" });
     }
   });
@@ -646,70 +702,121 @@ export function registerRoutes(app: Express): void {
   // =========================
   app.put("/api/admin/profile", isAdmin, async (req: Request, res: Response) => {
     try {
-      const { email, password, confirmPassword, currentPassword } = req.body;
+      console.log("=== Mise à jour du profil admin ===");
+      console.log("Body reçu:", JSON.stringify(req.body));
+      
+      const { email, username, password, confirmPassword, currentPassword } = req.body;
+      console.log("Données extraites:", { email, username, password: password ? "******" : undefined, confirmPassword: confirmPassword ? "******" : undefined, currentPassword: currentPassword ? "******" : undefined });
+      
       // Vérification côté backend : mot de passe et confirmation doivent correspondre
       if (password && password !== confirmPassword) {
+        console.log("Erreur: Les mots de passe ne correspondent pas");
         return res.status(400).json({ message: "Les mots de passe ne correspondent pas." });
       }
+      
       // On ne modifie QUE l'utilisateur connecté (admin)
       const adminId = req.user.id;
+      console.log("ID admin:", adminId);
+      
       const admin = await storage.getUser(adminId);
+      console.log("Admin trouvé:", admin ? `Oui (username: ${admin.username})` : "Non");
+      
       if (!admin || !admin.isAdmin) {
+        console.log("Erreur: Utilisateur non admin");
         return res.status(403).json({ message: "Accès non autorisé" });
       }
+
       // Vérifier si l'email change et s'il est déjà pris
       if (email && email !== admin.email) {
-        const exists = await storage.getUserByEmail(email);
-        if (exists && exists.id !== adminId) {
+        console.log(`Vérification de l'email: ${email}`);
+        const existingEmail = await storage.getUserByEmail(email);
+        console.log("Email existant:", existingEmail ? `Oui (id: ${existingEmail.id})` : "Non");
+        
+        if (existingEmail && existingEmail.id !== adminId) {
+          console.log("Erreur: Email déjà utilisé");
           return res.status(400).json({ message: "Cet email est déjà utilisé." });
         }
       }
+
+      // Vérifier si le nom d'utilisateur change et s'il est déjà pris
+      if (username && username !== admin.username) {
+        console.log(`Vérification du username: ${username}`);
+        const existingUsername = await storage.getUserByUsername(username);
+        console.log("Username existant:", existingUsername ? `Oui (id: ${existingUsername.id})` : "Non");
+        
+        if (existingUsername && existingUsername.id !== adminId) {
+          console.log("Erreur: Username déjà utilisé");
+          return res.status(400).json({ message: "Ce nom d'utilisateur est déjà utilisé." });
+        }
+      }
+
+      // Préparer les mises à jour
+      const update: any = {};
+      if (email && email !== admin.email) update.email = email;
+      if (username && username !== admin.username) update.username = username;
+      console.log("Mises à jour prévues (sans mot de passe):", update);
+
       // Si le mot de passe doit être changé, vérifier l'ancien mot de passe
       if (password && password.length > 0) {
+        console.log("Mise à jour du mot de passe demandée");
+        
         if (!currentPassword) {
+          console.log("Erreur: Mot de passe actuel non fourni");
           return res.status(400).json({ message: "Le mot de passe actuel est requis." });
         }
+        
         // Vérifier que currentPassword correspond au mot de passe actuel de l'admin
-        const { comparePasswords, hashPassword } = await import("./auth.js");
-        const valid = await comparePasswords(currentPassword, admin.password);
-        if (!valid) {
-          return res.status(400).json({ message: "Le mot de passe actuel est incorrect." });
-        }
-        // Hash le nouveau mot de passe uniquement si l'ancien est validé
-        const update: any = {};
-        if (email) update.email = email;
-        if (password && password.length > 0) {
+        console.log("Vérification du mot de passe actuel...");
+        try {
+          const valid = await comparePasswords(currentPassword, admin.password);
+          console.log("Mot de passe actuel valide:", valid);
+          
+          if (!valid) {
+            console.log("Erreur: Mot de passe actuel incorrect");
+            return res.status(400).json({ message: "Le mot de passe actuel est incorrect." });
+          }
+          
+          // Hash le nouveau mot de passe uniquement si l'ancien est validé
+          console.log("Hachage du nouveau mot de passe...");
           update.password = await hashPassword(password);
+          console.log("Nouveau mot de passe haché avec succès");
+        } catch (passwordError) {
+          console.error("Erreur lors de la vérification/hachage du mot de passe:", passwordError);
+          return res.status(500).json({ message: "Erreur lors du traitement du mot de passe." });
         }
-        if (Object.keys(update).length === 0) {
-          return res.status(400).json({ message: "Aucune modification à enregistrer." });
-        }
-        // Appliquer la mise à jour
+      }
+
+      // Vérifier s'il y a des modifications
+      if (Object.keys(update).length === 0) {
+        console.log("Aucune modification à enregistrer");
+        return res.status(400).json({ message: "Aucune modification à enregistrer." });
+      }
+      
+      // Appliquer la mise à jour
+      console.log("Application des mises à jour:", Object.keys(update));
+      try {
         const updated = await storage.updateUser(adminId, update);
+        console.log("Résultat de la mise à jour:", updated ? "Succès" : "Échec");
+        
         if (!updated) {
+          console.log("Erreur: Échec de la mise à jour");
           return res.status(500).json({ message: "Erreur lors de la mise à jour." });
         }
+        
         // Ne jamais renvoyer le mot de passe
         const { password: _, ...adminSafe } = updated;
+        console.log("Réponse envoyée avec succès");
         res.json(adminSafe);
-      } else {
-        // Si aucun mot de passe n'est fourni, mettre à jour uniquement l'email
-        const update: any = {};
-        if (email) update.email = email;
-        if (Object.keys(update).length === 0) {
-          return res.status(400).json({ message: "Aucune modification à enregistrer." });
-        }
-        // Appliquer la mise à jour
-        const updated = await storage.updateUser(adminId, update);
-        if (!updated) {
-          return res.status(500).json({ message: "Erreur lors de la mise à jour." });
-        }
-        // Ne jamais renvoyer le mot de passe
-        const { password: _, ...adminSafe } = updated;
-        res.json(adminSafe);
+      } catch (updateError) {
+        console.error("Erreur lors de la mise à jour de l'utilisateur:", updateError);
+        return res.status(500).json({ message: "Erreur lors de la mise à jour de l'utilisateur." });
       }
     } catch (error) {
       console.error("Erreur lors de la mise à jour du profil admin:", error);
+      if (error instanceof Error) {
+        console.error("Message d'erreur:", error.message);
+        console.error("Stack trace:", error.stack);
+      }
       res.status(500).json({ message: "Erreur serveur" });
     }
   });

@@ -5,16 +5,15 @@ import { registerRoutes } from "./routes.js";
 import { setupVite, serveStatic, log } from "./vite.js";
 import cors from 'cors';
 import session from 'express-session';
-import pg from 'pg';
-import connectPgSimple from 'connect-pg-simple';
-import { testConnection } from './db.js';
+import { testConnection } from "./db/index.js";
+import { storage } from "./storage-turso.js";
+import MemoryStore from 'memorystore';
+import TursoStore from "./turso-store";
+import { Storage } from "./storage";
+import { db, tursoClient } from "./db";
+import path from "path";
 
-const PgSession = connectPgSimple(session);
-
-const pgPool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+const MemoryStoreSession = MemoryStore(session);
 
 // Créer l'application Express
 const app = express();
@@ -44,10 +43,7 @@ app.options('*', cors());
 
 // --- Session Configuration ---
 app.use(session({
-  store: new PgSession({
-    pool: pgPool,
-    tableName: 'session'
-  }),
+  store: storage.sessionStore,
   secret: process.env.SESSION_SECRET || 'sportmarocshop-secret',
   resave: false,
   saveUninitialized: false,
@@ -89,6 +85,7 @@ app.get('/api/health', async (req, res) => {
       status: 'OK', 
       environment: process.env.NODE_ENV,
       database: dbConnected ? 'connected' : 'disconnected',
+      dbType: 'Turso SQLite',
       serverTime: new Date().toISOString()
     };
     console.log('Health check response:', responseData);
@@ -103,13 +100,8 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Initialiser les routes
-try {
-  registerRoutes(app);
-  console.log('Routes registered successfully');
-} catch (error) {
-  console.error('Failed to register routes:', error);
-}
+// Enregistrer toutes les routes
+registerRoutes(app);
 
 // Gestionnaire d'erreurs global
 app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
@@ -145,7 +137,7 @@ if (process.env.NODE_ENV === "development") {
     
     // Tester la connexion à la base de données au démarrage en développement
     testConnection().then(connected => {
-      console.log(`Database connection test: ${connected ? 'successful' : 'failed'}`);
+      console.log(`Turso database connection test: ${connected ? 'successful' : 'failed'}`);
     }).catch(err => {
       console.error('Database connection test error:', err);
     });

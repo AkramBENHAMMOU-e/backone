@@ -1,10 +1,10 @@
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
-import { Express } from "express";
+import { Express, Request, Response, NextFunction } from "express";
 import session from "express-session";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
-import { storage } from "./storage-db.js"; // Utiliser le stockage avec base de données
+import { storage } from "./storage-turso.js"; // Utiliser le stockage avec base de données
 import { User as SelectUser } from "./shared/schema.js"; // Removed .js extension
 
 declare global {
@@ -15,17 +15,16 @@ declare global {
 
 const scryptAsync = promisify(scrypt);
 
-async function hashPassword(password: string) {
+export async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
   const buf = (await scryptAsync(password, salt, 64)) as Buffer;
   return `${buf.toString("hex")}.${salt}`;
 }
 
-async function comparePasswords(supplied: string, stored: string) {
-  const [hashed, salt] = stored.split(".");
-  const hashedBuf = Buffer.from(hashed, "hex");
-  const suppliedBuf = (await scryptAsync(supplied, salt, 64)) as Buffer;
-  return timingSafeEqual(hashedBuf, suppliedBuf);
+export async function comparePasswords(password: string, storedPassword: string) {
+  const [hashedPassword, salt] = storedPassword.split(".");
+  const buf = (await scryptAsync(password, salt, 64)) as Buffer;
+  return timingSafeEqual(Buffer.from(hashedPassword, "hex"), buf);
 }
 
 export function setupAuth(app: Express) {
@@ -47,85 +46,119 @@ export function setupAuth(app: Express) {
 
   passport.use(
     new LocalStrategy(async (username, password, done) => {
-      const user = await storage.getUserByUsername(username);
-      if (!user || !(await comparePasswords(password, user.password))) {
-        return done(null, false);
-      } else {
+      try {
+        let user = await storage.getUserByUsername(username);
+        
+        if (!user) {
+          user = await storage.getUserByEmail(username);
+        }
+        
+        if (!user) {
+          return done(null, false, { message: "Nom d'utilisateur ou mot de passe incorrect" });
+        }
+        
+        const isValidPassword = await comparePasswords(password, user.password);
+        
+        if (!isValidPassword) {
+          return done(null, false, { message: "Nom d'utilisateur ou mot de passe incorrect" });
+        }
+        
         return done(null, user);
+      } catch (error) {
+        return done(error);
       }
-    }),
+    })
   );
 
-  passport.serializeUser((user, done) => done(null, user.id));
-  passport.deserializeUser(async (id: number, done) => {
-    const user = await storage.getUser(id);
-    done(null, user);
+  passport.serializeUser((user: any, done) => {
+    done(null, user.id);
   });
-
-  app.post("/api/register", async (req, res, next) => {
+  
+  passport.deserializeUser(async (id: number, done) => {
     try {
-      const { username, email } = req.body;
-
-      // Check if username already exists
-      const existingUser = await storage.getUserByUsername(username);
-      if (existingUser) {
-        return res.status(400).json({ message: "Nom d'utilisateur déjà utilisé" });
-      }
-      
-      // Check if email already exists
-      const existingEmail = await storage.getUserByEmail(email);
-      if (existingEmail) {
-        return res.status(400).json({ message: "Email déjà utilisé" });
-      }
-
-      // Create the user with hashed password
-      const user = await storage.createUser({
-        ...req.body,
-        password: await hashPassword(req.body.password),
-      });
-
-      // Remove password from response
-      const { password, ...userWithoutPassword } = user;
-
-      // Login the user
-      req.login(user, (err) => {
-        if (err) return next(err);
-        res.status(201).json(userWithoutPassword);
-      });
+      const user = await storage.getUser(id);
+      done(null, user);
     } catch (error) {
-      console.error("Registration error:", error);
-      res.status(500).json({ message: "Erreur lors de l'inscription" });
+      done(error, null);
     }
   });
 
-  app.post("/api/login", (req, res, next) => {
-    passport.authenticate("local", (err: any, user: any, info: any) => {
-      if (err) return next(err);
-      if (!user) {
-        return res.status(401).json({ message: "Nom d'utilisateur ou mot de passe incorrect" });
+  app.post("/api/auth/register", async (req, res, next) => {
+    try {
+      const { username, password, email, fullName, phoneNumber, address } = req.body;
+      
+      if (!username || !password || !email || !fullName) {
+        return res.status(400).json({ message: "Tous les champs requis doivent être remplis" });
       }
       
-      req.login(user, (err) => {
-        if (err) return next(err);
+      const existingUser = await storage.getUserByUsername(username);
+      if (existingUser) {
+        return res.status(400).json({ message: "Ce nom d'utilisateur est déjà pris" });
+      }
+      
+      const existingEmail = await storage.getUserByEmail(email);
+      if (existingEmail) {
+        return res.status(400).json({ message: "Cet email est déjà utilisé" });
+      }
+      
+      const newUser = await storage.createUser({
+        username,
+        password,
+        email,
+        fullName,
+        phoneNumber,
+        address,
+        isAdmin: false,
+      });
+      
+      req.logIn(newUser, (loginErr) => {
+        if (loginErr) {
+          return next(loginErr);
+        }
         
-        // Remove password from response
+        const { password, ...userWithoutPassword } = newUser;
+        return res.status(201).json(userWithoutPassword);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/auth/login", (req, res, next) => {
+    passport.authenticate("local", (err, user, info) => {
+      if (err) {
+        return next(err);
+      }
+      
+      if (!user) {
+        return res.status(401).json({ message: info.message || "Échec de l'authentification" });
+      }
+      
+      req.logIn(user, (loginErr) => {
+        if (loginErr) {
+          return next(loginErr);
+        }
+        
         const { password, ...userWithoutPassword } = user;
-        res.json(userWithoutPassword);
+        return res.json(userWithoutPassword);
       });
     })(req, res, next);
   });
 
-  app.post("/api/logout", (req, res, next) => {
-    req.logout((err) => {
-      if (err) return next(err);
-      res.sendStatus(200);
+  app.post("/api/auth/logout", (req, res) => {
+    req.logout(function(err) {
+      if (err) {
+        return res.status(500).json({ message: "Erreur lors de la déconnexion" });
+      }
+      res.json({ message: "Déconnecté avec succès" });
     });
   });
 
-  app.get("/api/user", (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app.get("/api/auth/me", (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Non authentifié" });
+    }
     
-    // Remove password from response
     const { password, ...userWithoutPassword } = req.user;
     res.json(userWithoutPassword);
   });
